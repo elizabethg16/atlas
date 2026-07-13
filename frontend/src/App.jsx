@@ -1,42 +1,170 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import Globe from 'react-globe.gl';
 import './App.css';
 
 function App() {
   const globeRef = useRef();
+
   const [countries, setCountries] = useState({ features: [] });
+  const [admin1, setAdmin1] = useState({ features: [] });
   const [selectedCountry, setSelectedCountry] = useState(null);
-  const [facts, setFacts] = useState([]);
+  const [selectedRegion, setSelectedRegion] = useState(null);
   const [selectedLetter, setSelectedLetter] = useState(null);
+  const [facts, setFacts] = useState([]);
 
   // Load GeoJSON on mount
   useEffect(() => {
     fetch('/countries.geojson')
       .then(res => res.json())
       .then(data => setCountries(data));
+
+    fetch('/admin1.geojson')
+      .then(res => res.json())
+      .then(data => setAdmin1(data));
   }, []);
 
-  const handleCountryClick = (country) => {
-    setSelectedCountry(country);
+  // Quick lookup: country ADM0_A3 code -> country feature (used to find a region's parent country)
+  const countryByCode = useMemo(() => {
+    const map = {};
+    countries.features.forEach((c) => {
+      map[c.properties.ADM0_A3] = c;
+    });
+    return map;
+  }, [countries]);
 
-    // Smoothly point camera at the country's centroid
-    if (globeRef.current && country) {
+  const isRegionFeature = (d) => !!d.properties.iso_3166_2;
+  const letterOf = (d) =>
+    (isRegionFeature(d) ? d.properties.name : d.properties.ADMIN)?.[0]?.toUpperCase();
+
+  // Regions belonging to the currently drilled-into country (always shown once a country is picked,
+  // regardless of whether they match the active letter)
+  const ownRegions = selectedCountry
+    ? admin1.features.filter(
+        (r) => r.properties.adm0_a3 === selectedCountry.properties.ADM0_A3
+      )
+    : [];
+
+  // Regions anywhere in the world that match the active letter -
+  // skip any whose parent country ALSO starts with that letter, since the whole country
+  // is already highlighted and re-highlighting one of its regions would be redundant (requirement 5)
+  const letterMatchedRegions = selectedLetter
+    ? admin1.features.filter((r) => {
+        if (r.properties.name?.[0]?.toUpperCase() !== selectedLetter) return false;
+        const parentCountry = countryByCode[r.properties.adm0_a3];
+        const parentLetter = parentCountry?.properties.ADMIN?.[0]?.toUpperCase();
+        return parentLetter !== selectedLetter;
+      })
+    : [];
+
+  // Merge + dedupe (a region could show up in both lists above)
+  const displayedRegions = useMemo(() => {
+    const map = new Map();
+    [...ownRegions, ...letterMatchedRegions].forEach((r) => {
+      const key = r.properties.iso_3166_2 || `${r.properties.adm0_a3}-${r.properties.name}`;
+      map.set(key, r);
+    });
+    return Array.from(map.values());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCountry, selectedLetter, admin1]);
+
+  const handleCountryClick = (country) => {
+    if (selectedCountry && selectedCountry.properties.ADM0_A3 === country.properties.ADM0_A3) {
+      return; // already selected - let region clicks take over from here
+    }
+    setSelectedCountry(country);
+    setSelectedRegion(null);
+    setSelectedLetter(country.properties.ADMIN?.[0]?.toUpperCase());
+
+    if (globeRef.current) {
       const coords = getCentroid(country);
       globeRef.current.pointOfView({ lat: coords[1], lng: coords[0], altitude: 1.5 }, 1000);
     }
 
-    // Fetch facts from backend (placeholder for now)
     fetch(`http://localhost:3001/api/countries/${country.properties.ISO_A2}/facts`)
       .then(res => res.json())
       .then(data => setFacts(data.facts))
       .catch(() => setFacts([]));
   };
 
+  const handleRegionClick = (region) => {
+    setSelectedRegion(region);
+    setSelectedLetter(region.properties.name?.[0]?.toUpperCase());
+
+    // A region can now be reached either via drill-down or via letter-highlighting from
+    // another country entirely - make sure the panel/back-button/camera stay in sync either way
+    const parentCountry = countryByCode[region.properties.adm0_a3];
+    if (parentCountry) setSelectedCountry(parentCountry);
+
+    if (globeRef.current) {
+      const coords = getCentroid(region);
+      globeRef.current.pointOfView({ lat: coords[1], lng: coords[0], altitude: 0.5 }, 1000);
+    }
+
+    fetch(`http://localhost:3001/api/regions/${region.properties.iso_3166_2}/facts`)
+      .then(res => res.json())
+      .then(data => setFacts(data.facts))
+      .catch(() => setFacts([]));
+  };
+
+  const handleBackToCountry = () => {
+    setSelectedRegion(null);
+    if (selectedCountry) {
+      setSelectedLetter(selectedCountry.properties.ADMIN?.[0]?.toUpperCase());
+    }
+  };
+
   const handleLetterClick = (letter) => {
-    // toggle off if clicking the same letter again
     setSelectedLetter(prev => (prev === letter ? null : letter));
-    setSelectedCountry(null); // clear single-country selection so colors don't conflict
+    setSelectedCountry(null);
+    setSelectedRegion(null);
     setFacts([]);
+  };
+
+  const getStrokeColor = (d) => {
+    const isRegion = isRegionFeature(d);
+    if (!isRegion && selectedCountry && d.properties.ADM0_A3 === selectedCountry.properties.ADM0_A3) {
+      return '#ffffff'; // bright outline for the clicked country
+    }
+    return '#111'; // default thin border for everything else
+  };
+
+  const COUNTRY_ALT = 0.006;
+const COUNTRY_ALT_SELECTED = 0.009; // raised podium effect - still safely below REGION_ALT
+const REGION_ALT = 0.01;
+
+const getAltitude = (d) => {
+  if (!isRegionFeature(d)) {
+    const isSelected = selectedCountry && d.properties.ADM0_A3 === selectedCountry.properties.ADM0_A3;
+    return isSelected ? COUNTRY_ALT_SELECTED : COUNTRY_ALT;
+  }
+  const letterMatches = selectedLetter && letterOf(d) === selectedLetter;
+  return letterMatches ? REGION_ALT + 0.003 : REGION_ALT;
+};
+
+const getSideColor = (d) => {
+  const isRegion = isRegionFeature(d);
+  if (!isRegion && selectedCountry && d.properties.ADM0_A3 === selectedCountry.properties.ADM0_A3) {
+    return '#ffcc33'; // bright, opaque wall around the selected country
+  }
+  return 'rgba(0, 100, 200, 0.15)'; // default
+};
+
+  const getCapColor = (d) => {
+    const isRegion = isRegionFeature(d);
+
+    if (isRegion) {
+      if (d === selectedRegion) return 'rgba(255, 200, 50, 0.9)';
+      if (selectedLetter && letterOf(d) === selectedLetter) return 'rgba(255, 170, 60, 0.75)';
+      return 'rgba(255, 255, 255, 0.25)';
+    }
+
+    if (selectedCountry && d.properties.ADM0_A3 === selectedCountry.properties.ADM0_A3) {
+      return 'rgba(255, 100, 50, 0.85)';
+    }
+    if (selectedLetter && letterOf(d) === selectedLetter) {
+      return 'rgba(255, 100, 50, 0.6)';
+    }
+    return 'rgba(200, 200, 200, 0.3)';
   };
 
   return (
@@ -45,21 +173,15 @@ function App() {
         ref={globeRef}
         globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
         backgroundColor="#000000"
-        polygonsData={countries.features}
-        polygonCapColor={(d) => {
-          if (selectedLetter) {
-            return d.properties.ADMIN.toUpperCase().startsWith(selectedLetter)
-              ? 'rgba(255, 100, 50, 0.8)'
-              : 'rgba(200, 200, 200, 0.15)';
-          }
-          return d === selectedCountry
-            ? 'rgba(255, 100, 50, 0.8)'
-            : 'rgba(200, 200, 200, 0.3)';
-        }}
+        polygonsData={[...countries.features, ...displayedRegions]}
+        polygonCapColor={getCapColor}
+        polygonAltitude={getAltitude}
         polygonSideColor={() => 'rgba(0, 100, 200, 0.15)'}
-        polygonStrokeColor={() => '#111'}
-        polygonLabel={(d) => d.properties.ADMIN}
-        onPolygonClick={handleCountryClick}
+        polygonStrokeColor={getStrokeColor}
+        polygonLabel={(d) => d.properties.name || d.properties.ADMIN}
+        onPolygonClick={(d) => {
+          isRegionFeature(d) ? handleRegionClick(d) : handleCountryClick(d);
+        }}
         polygonsTransitionDuration={300}
       />
 
@@ -78,13 +200,16 @@ function App() {
         ))}
       </div>
 
-      {selectedCountry && (
+      {(selectedCountry || selectedRegion) && (
         <div style={panelStyle}>
-          <h2>{selectedCountry.properties.ADMIN}</h2>
+          {selectedRegion && (
+            <button onClick={handleBackToCountry} style={{ marginBottom: 8 }}>
+              ← Back to {selectedCountry?.properties.ADMIN}
+            </button>
+          )}
+          <h2>{selectedRegion ? selectedRegion.properties.name : selectedCountry.properties.ADMIN}</h2>
           {facts.length > 0 ? (
-            <ul>
-              {facts.map((f, i) => <li key={i}>{f}</li>)}
-            </ul>
+            <ul>{facts.map((f, i) => <li key={i}>{f}</li>)}</ul>
           ) : (
             <p>No facts loaded yet — hook up the backend pipeline.</p>
           )}
