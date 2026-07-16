@@ -10,6 +10,7 @@ function App() {
   const [selectedCountry, setSelectedCountry] = useState(null);
   const [selectedRegion, setSelectedRegion] = useState(null);
   const [selectedLetter, setSelectedLetter] = useState(null);
+  const [drilledIn, setDrilledIn] = useState(false); // true once the user has clicked the selected country a 2nd time
   const [facts, setFacts] = useState([]);
 
   // Load GeoJSON on mount
@@ -36,9 +37,11 @@ function App() {
   const letterOf = (d) =>
     (isRegionFeature(d) ? d.properties.name : d.properties.ADMIN)?.[0]?.toUpperCase();
 
-  // Regions belonging to the currently drilled-into country (always shown once a country is picked,
-  // regardless of whether they match the active letter)
-  const ownRegions = selectedCountry
+  // Regions belonging to the currently drilled-into country - only shown once the user
+  // has clicked the already-selected country a second time, NOT immediately on first click.
+  // This is what lets the country itself stay fully visible (nothing rendered on top of it)
+  // while it's just "selected" but not yet "drilled into."
+  const ownRegions = selectedCountry && drilledIn
     ? admin1.features.filter(
         (r) => r.properties.adm0_a3 === selectedCountry.properties.ADM0_A3
       )
@@ -46,7 +49,7 @@ function App() {
 
   // Regions anywhere in the world that match the active letter -
   // skip any whose parent country ALSO starts with that letter, since the whole country
-  // is already highlighted and re-highlighting one of its regions would be redundant (requirement 5)
+  // is already highlighted and re-highlighting one of its regions would be redundant
   const letterMatchedRegions = selectedLetter
     ? admin1.features.filter((r) => {
         if (r.properties.name?.[0]?.toUpperCase() !== selectedLetter) return false;
@@ -59,20 +62,30 @@ function App() {
   // Merge + dedupe (a region could show up in both lists above)
   const displayedRegions = useMemo(() => {
     const map = new Map();
-    [...ownRegions, ...letterMatchedRegions].forEach((r) => {
-      const key = r.properties.iso_3166_2 || `${r.properties.adm0_a3}-${r.properties.name}`;
-      map.set(key, r);
-    });
+[...ownRegions, ...letterMatchedRegions].forEach((r) => {
+  const key = `${r.properties.adm0_a3}-${r.properties.name}`; // always unique - iso_3166_2 isn't reliable (e.g. UK regions all share 'GB')
+  map.set(key, r);
+});
     return Array.from(map.values());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCountry, selectedLetter, admin1]);
+  }, [selectedCountry, drilledIn, selectedLetter, admin1]);
 
   const handleCountryClick = (country) => {
-    if (selectedCountry && selectedCountry.properties.ADM0_A3 === country.properties.ADM0_A3) {
-      return; // already selected - let region clicks take over from here
+    const isSameCountry = selectedCountry && selectedCountry.properties.ADM0_A3 === country.properties.ADM0_A3;
+
+    if (isSameCountry && !drilledIn) {
+      // Second click on the already-selected country - now reveal its regions
+      setDrilledIn(true);
+      return;
     }
+    if (isSameCountry && drilledIn) {
+      return; // already drilled in - region clicks take over from here
+    }
+
+    // Clicking a brand new country - select it flat/highlighted, not yet drilled in
     setSelectedCountry(country);
     setSelectedRegion(null);
+    setDrilledIn(false);
     setSelectedLetter(country.properties.ADMIN?.[0]?.toUpperCase());
 
     if (globeRef.current) {
@@ -89,6 +102,7 @@ function App() {
   const handleRegionClick = (region) => {
     setSelectedRegion(region);
     setSelectedLetter(region.properties.name?.[0]?.toUpperCase());
+    setDrilledIn(true);
 
     // A region can now be reached either via drill-down or via letter-highlighting from
     // another country entirely - make sure the panel/back-button/camera stay in sync either way
@@ -117,37 +131,20 @@ function App() {
     setSelectedLetter(prev => (prev === letter ? null : letter));
     setSelectedCountry(null);
     setSelectedRegion(null);
+    setDrilledIn(false);
     setFacts([]);
   };
 
-  const getStrokeColor = (d) => {
-    const isRegion = isRegionFeature(d);
-    if (!isRegion && selectedCountry && d.properties.ADM0_A3 === selectedCountry.properties.ADM0_A3) {
-      return '#ffffff'; // bright outline for the clicked country
-    }
-    return '#111'; // default thin border for everything else
-  };
-
+  // Countries stay flat at all times - this is what guarantees region clicks always work,
+  // since a country can never rise above (and block clicks on) its own regions
   const COUNTRY_ALT = 0.006;
-const COUNTRY_ALT_SELECTED = 0.009; // raised podium effect - still safely below REGION_ALT
-const REGION_ALT = 0.01;
+  const REGION_ALT = 0.01;
 
-const getAltitude = (d) => {
-  if (!isRegionFeature(d)) {
-    const isSelected = selectedCountry && d.properties.ADM0_A3 === selectedCountry.properties.ADM0_A3;
-    return isSelected ? COUNTRY_ALT_SELECTED : COUNTRY_ALT;
-  }
-  const letterMatches = selectedLetter && letterOf(d) === selectedLetter;
-  return letterMatches ? REGION_ALT + 0.003 : REGION_ALT;
-};
-
-const getSideColor = (d) => {
-  const isRegion = isRegionFeature(d);
-  if (!isRegion && selectedCountry && d.properties.ADM0_A3 === selectedCountry.properties.ADM0_A3) {
-    return '#ffcc33'; // bright, opaque wall around the selected country
-  }
-  return 'rgba(0, 100, 200, 0.15)'; // default
-};
+  const getAltitude = (d) => {
+    if (!isRegionFeature(d)) return COUNTRY_ALT;
+    const letterMatches = selectedLetter && letterOf(d) === selectedLetter;
+    return letterMatches ? REGION_ALT + 0.003 : REGION_ALT;
+  };
 
   const getCapColor = (d) => {
     const isRegion = isRegionFeature(d);
@@ -155,16 +152,17 @@ const getSideColor = (d) => {
     if (isRegion) {
       if (d === selectedRegion) return 'rgba(255, 200, 50, 0.9)';
       if (selectedLetter && letterOf(d) === selectedLetter) return 'rgba(255, 170, 60, 0.75)';
+      if (selectedCountry && d.properties.adm0_a3 === selectedCountry.properties.ADM0_A3) {
+        return 'rgba(255, 140, 90, 0.45)'; // belongs to the drilled-into country
+      }
       return 'rgba(255, 255, 255, 0.25)';
     }
 
-    if (selectedCountry && d.properties.ADM0_A3 === selectedCountry.properties.ADM0_A3) {
-      return 'rgba(255, 100, 50, 0.85)';
-    }
-    if (selectedLetter && letterOf(d) === selectedLetter) {
-      return 'rgba(255, 100, 50, 0.6)';
-    }
-    return 'rgba(200, 200, 200, 0.3)';
+    // A country's cap is only ever covered once its OWN regions render on top of it -
+    // and now that only happens after drilledIn, a selected-but-not-yet-drilled country
+    // is fully visible and gets the exact same treatment as any other letter match
+    const letterMatches = selectedLetter && letterOf(d) === selectedLetter;
+    return letterMatches ? 'rgba(255, 100, 50, 0.6)' : 'rgba(200, 200, 200, 0.3)';
   };
 
   return (
@@ -177,7 +175,7 @@ const getSideColor = (d) => {
         polygonCapColor={getCapColor}
         polygonAltitude={getAltitude}
         polygonSideColor={() => 'rgba(0, 100, 200, 0.15)'}
-        polygonStrokeColor={getStrokeColor}
+        polygonStrokeColor={() => '#111'}
         polygonLabel={(d) => d.properties.name || d.properties.ADMIN}
         onPolygonClick={(d) => {
           isRegionFeature(d) ? handleRegionClick(d) : handleCountryClick(d);
@@ -208,6 +206,9 @@ const getSideColor = (d) => {
             </button>
           )}
           <h2>{selectedRegion ? selectedRegion.properties.name : selectedCountry.properties.ADMIN}</h2>
+          {!selectedRegion && !drilledIn && (
+            <p style={{ opacity: 0.7, fontSize: 13 }}>Click again to see regions</p>
+          )}
           {facts.length > 0 ? (
             <ul>{facts.map((f, i) => <li key={i}>{f}</li>)}</ul>
           ) : (
