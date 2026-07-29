@@ -15,13 +15,19 @@ function App() {
 
   // Load GeoJSON on mount
   useEffect(() => {
-    fetch('/countries.geojson')
+    fetch(`${import.meta.env.BASE_URL}countries.geojson`)
       .then(res => res.json())
-      .then(data => setCountries(data));
-
-    fetch('/admin1.geojson')
+      .then(data => {
+        data.features = data.features.filter(f => f.geometry !== null);
+        setCountries(data);
+      });
+  
+    fetch(`${import.meta.env.BASE_URL}admin1.geojson`)
       .then(res => res.json())
-      .then(data => setAdmin1(data));
+      .then(data => {
+        data.features = data.features.filter(f => f.geometry !== null);
+        setAdmin1(data);
+      });
   }, []);
 
   // Quick lookup: country ADM0_A3 code -> country feature (used to find a region's parent country)
