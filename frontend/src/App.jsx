@@ -78,8 +78,7 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCountry, drilledIn, selectedLetter, admin1]);
 
-  // Gated by both the active letter AND the showCities toggle - either one being off
-  // means no city points render
+  
   const letterMatchedCities = useMemo(() => {
     if (!selectedLetter || !showCities) return [];
     return cities.features.filter(
@@ -186,9 +185,6 @@ function App() {
     if (isRegion) {
       if (d === selectedRegion) return 'rgba(255, 200, 50, 0.9)';
       if (selectedLetter && letterOf(d) === selectedLetter) return 'rgba(255, 170, 60, 0.75)';
-      if (selectedCountry && d.properties.adm0_a3 === selectedCountry.properties.ADM0_A3) {
-        return 'rgba(255, 140, 90, 0.45)';
-      }
       return 'rgba(255, 255, 255, 0.25)';
     }
 
@@ -443,7 +439,6 @@ const letterButtonStyle = {
   transition: 'background 0.15s ease',
 };
 
-// Small vertical pill toggle, styled to sit above the letter ruler as its own control
 const cityToggleStyle = (active) => ({
   writingMode: 'vertical-rl',
   textOrientation: 'mixed',
