@@ -182,3 +182,21 @@
     border-right-color: var(--border);
   }
 }
+
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Space+Grotesk:wght@400;500;600&display=swap');
+
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* the globe fills the viewport - nothing should ever need to scroll */
+  background: #050B14;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+* {
+  box-sizing: border-box;
+}

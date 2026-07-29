@@ -2,18 +2,25 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import Globe from 'react-globe.gl';
 import './App.css';
 
+function cityStableId(props) {
+  const slug = props.name?.toLowerCase().replace(/[^a-z0-9]+/g, '-') ?? 'unknown';
+  return `${props.adm0_a3}-${slug}`;
+}
+
 function App() {
   const globeRef = useRef();
 
   const [countries, setCountries] = useState({ features: [] });
   const [admin1, setAdmin1] = useState({ features: [] });
+  const [cities, setCities] = useState({ features: [] });
   const [selectedCountry, setSelectedCountry] = useState(null);
   const [selectedRegion, setSelectedRegion] = useState(null);
+  const [selectedCity, setSelectedCity] = useState(null);
   const [selectedLetter, setSelectedLetter] = useState(null);
-  const [drilledIn, setDrilledIn] = useState(false); // true once the user has clicked the selected country a 2nd time
+  const [drilledIn, setDrilledIn] = useState(false);
+  const [showCities, setShowCities] = useState(true); // master on/off switch for the city layer
   const [facts, setFacts] = useState([]);
 
-  // Load GeoJSON on mount
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}countries.geojson`)
       .then(res => res.json())
@@ -21,16 +28,19 @@ function App() {
         data.features = data.features.filter(f => f.geometry !== null);
         setCountries(data);
       });
-  
+
     fetch(`${import.meta.env.BASE_URL}admin1.geojson`)
       .then(res => res.json())
       .then(data => {
         data.features = data.features.filter(f => f.geometry !== null);
         setAdmin1(data);
       });
+
+    fetch(`${import.meta.env.BASE_URL}cities.geojson`)
+      .then(res => res.json())
+      .then(data => setCities(data));
   }, []);
 
-  // Quick lookup: country ADM0_A3 code -> country feature (used to find a region's parent country)
   const countryByCode = useMemo(() => {
     const map = {};
     countries.features.forEach((c) => {
@@ -43,19 +53,12 @@ function App() {
   const letterOf = (d) =>
     (isRegionFeature(d) ? d.properties.name : d.properties.ADMIN)?.[0]?.toUpperCase();
 
-  // Regions belonging to the currently drilled-into country - only shown once the user
-  // has clicked the already-selected country a second time, NOT immediately on first click.
-  // This is what lets the country itself stay fully visible (nothing rendered on top of it)
-  // while it's just "selected" but not yet "drilled into."
   const ownRegions = selectedCountry && drilledIn
     ? admin1.features.filter(
         (r) => r.properties.adm0_a3 === selectedCountry.properties.ADM0_A3
       )
     : [];
 
-  // Regions anywhere in the world that match the active letter -
-  // skip any whose parent country ALSO starts with that letter, since the whole country
-  // is already highlighted and re-highlighting one of its regions would be redundant
   const letterMatchedRegions = selectedLetter
     ? admin1.features.filter((r) => {
         if (r.properties.name?.[0]?.toUpperCase() !== selectedLetter) return false;
@@ -65,32 +68,39 @@ function App() {
       })
     : [];
 
-  // Merge + dedupe (a region could show up in both lists above)
   const displayedRegions = useMemo(() => {
     const map = new Map();
-[...ownRegions, ...letterMatchedRegions].forEach((r) => {
-  const key = `${r.properties.adm0_a3}-${r.properties.name}`; // always unique - iso_3166_2 isn't reliable (e.g. UK regions all share 'GB')
-  map.set(key, r);
-});
+    [...ownRegions, ...letterMatchedRegions].forEach((r) => {
+      const key = `${r.properties.adm0_a3}-${r.properties.name}`;
+      map.set(key, r);
+    });
     return Array.from(map.values());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCountry, drilledIn, selectedLetter, admin1]);
+
+  // Gated by both the active letter AND the showCities toggle - either one being off
+  // means no city points render
+  const letterMatchedCities = useMemo(() => {
+    if (!selectedLetter || !showCities) return [];
+    return cities.features.filter(
+      (c) => c.properties.name?.[0]?.toUpperCase() === selectedLetter
+    );
+  }, [cities, selectedLetter, showCities]);
 
   const handleCountryClick = (country) => {
     const isSameCountry = selectedCountry && selectedCountry.properties.ADM0_A3 === country.properties.ADM0_A3;
 
     if (isSameCountry && !drilledIn) {
-      // Second click on the already-selected country - now reveal its regions
       setDrilledIn(true);
       return;
     }
     if (isSameCountry && drilledIn) {
-      return; // already drilled in - region clicks take over from here
+      return;
     }
 
-    // Clicking a brand new country - select it flat/highlighted, not yet drilled in
     setSelectedCountry(country);
     setSelectedRegion(null);
+    setSelectedCity(null);
     setDrilledIn(false);
     setSelectedLetter(country.properties.ADMIN?.[0]?.toUpperCase());
 
@@ -107,11 +117,10 @@ function App() {
 
   const handleRegionClick = (region) => {
     setSelectedRegion(region);
+    setSelectedCity(null);
     setSelectedLetter(region.properties.name?.[0]?.toUpperCase());
     setDrilledIn(true);
 
-    // A region can now be reached either via drill-down or via letter-highlighting from
-    // another country entirely - make sure the panel/back-button/camera stay in sync either way
     const parentCountry = countryByCode[region.properties.adm0_a3];
     if (parentCountry) setSelectedCountry(parentCountry);
 
@@ -126,8 +135,28 @@ function App() {
       .catch(() => setFacts([]));
   };
 
+  const handleCityClick = (city) => {
+    setSelectedCity(city);
+    setSelectedLetter(city.properties.name?.[0]?.toUpperCase());
+
+    const parentCountry = countryByCode[city.properties.adm0_a3];
+    if (parentCountry) setSelectedCountry(parentCountry);
+    setSelectedRegion(null);
+
+    if (globeRef.current) {
+      const [lng, lat] = city.geometry.coordinates;
+      globeRef.current.pointOfView({ lat, lng, altitude: 0.3 }, 1000);
+    }
+
+    fetch(`http://localhost:3001/api/cities/${cityStableId(city.properties)}/facts`)
+      .then(res => res.json())
+      .then(data => setFacts(data.facts))
+      .catch(() => setFacts([]));
+  };
+
   const handleBackToCountry = () => {
     setSelectedRegion(null);
+    setSelectedCity(null);
     if (selectedCountry) {
       setSelectedLetter(selectedCountry.properties.ADMIN?.[0]?.toUpperCase());
     }
@@ -137,12 +166,11 @@ function App() {
     setSelectedLetter(prev => (prev === letter ? null : letter));
     setSelectedCountry(null);
     setSelectedRegion(null);
+    setSelectedCity(null);
     setDrilledIn(false);
     setFacts([]);
   };
 
-  // Countries stay flat at all times - this is what guarantees region clicks always work,
-  // since a country can never rise above (and block clicks on) its own regions
   const COUNTRY_ALT = 0.006;
   const REGION_ALT = 0.01;
 
@@ -159,24 +187,27 @@ function App() {
       if (d === selectedRegion) return 'rgba(255, 200, 50, 0.9)';
       if (selectedLetter && letterOf(d) === selectedLetter) return 'rgba(255, 170, 60, 0.75)';
       if (selectedCountry && d.properties.adm0_a3 === selectedCountry.properties.ADM0_A3) {
-        return 'rgba(255, 140, 90, 0.45)'; // belongs to the drilled-into country
+        return 'rgba(255, 140, 90, 0.45)';
       }
       return 'rgba(255, 255, 255, 0.25)';
     }
 
-    // A country's cap is only ever covered once its OWN regions render on top of it -
-    // and now that only happens after drilledIn, a selected-but-not-yet-drilled country
-    // is fully visible and gets the exact same treatment as any other letter match
     const letterMatches = selectedLetter && letterOf(d) === selectedLetter;
     return letterMatches ? 'rgba(255, 100, 50, 0.6)' : 'rgba(200, 200, 200, 0.3)';
   };
 
+  const getPointColor = (d) =>
+    d === selectedCity ? '#FFD700' : '#D4A24C';
+
+  const getPointRadius = (d) =>
+    d === selectedCity ? 0.55 : 0.35;
+
   return (
-    <div style={{ position: 'relative', width: '100vw', height: '100vh' }}>
+    <div style={{ position: 'relative', width: '100%', height: '100vh', overflow: 'hidden', background: '#050B14' }}>
       <Globe
         ref={globeRef}
         globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
-        backgroundColor="#000000"
+        backgroundColor="#050B14"
         polygonsData={[...countries.features, ...displayedRegions]}
         polygonCapColor={getCapColor}
         polygonAltitude={getAltitude}
@@ -187,38 +218,74 @@ function App() {
           isRegionFeature(d) ? handleRegionClick(d) : handleCountryClick(d);
         }}
         polygonsTransitionDuration={300}
+        pointsData={letterMatchedCities}
+        pointLat={(d) => d.geometry.coordinates[1]}
+        pointLng={(d) => d.geometry.coordinates[0]}
+        pointColor={getPointColor}
+        pointAltitude={0.02}
+        pointRadius={getPointRadius}
+        pointLabel={(d) => d.properties.name}
+        pointsMerge={false}
+        onPointClick={handleCityClick}
       />
 
       <div style={sidebarStyle}>
+        <div style={sidebarLabelStyle}>INDEX</div>
+
+        <button
+          onClick={() => setShowCities((v) => !v)}
+          style={cityToggleStyle(showCities)}
+          title={showCities ? 'Hide cities' : 'Show cities'}
+        >
+          <span style={cityToggleDotStyle(showCities)} />
+          CITIES
+        </button>
+
         {ALPHABET.map((letter) => (
-          <button
-            key={letter}
-            onClick={() => handleLetterClick(letter)}
-            style={{
-              ...letterButtonStyle,
-              background: selectedLetter === letter ? '#ff6432' : 'rgba(255,255,255,0.08)',
-            }}
-          >
-            {letter}
-          </button>
+          <div key={letter} style={rulerRowStyle}>
+            <div style={{ ...tickStyle, opacity: selectedLetter === letter ? 1 : 0.25 }} />
+            <button
+              onClick={() => handleLetterClick(letter)}
+              style={{
+                ...letterButtonStyle,
+                color: selectedLetter === letter ? '#050B14' : '#7FA8C9',
+                background: selectedLetter === letter ? '#ff6432' : 'transparent',
+                fontWeight: selectedLetter === letter ? 600 : 400,
+              }}
+            >
+              {letter}
+            </button>
+          </div>
         ))}
       </div>
 
-      {(selectedCountry || selectedRegion) && (
+      {(selectedCountry || selectedRegion || selectedCity) && (
         <div style={panelStyle}>
-          {selectedRegion && (
-            <button onClick={handleBackToCountry} style={{ marginBottom: 8 }}>
-              ← Back to {selectedCountry?.properties.ADMIN}
+          <div style={panelAccentBar} />
+          {(selectedRegion || selectedCity) && (
+            <button onClick={handleBackToCountry} style={backButtonStyle}>
+              ← {selectedCountry?.properties.ADMIN}
             </button>
           )}
-          <h2>{selectedRegion ? selectedRegion.properties.name : selectedCountry.properties.ADMIN}</h2>
-          {!selectedRegion && !drilledIn && (
-            <p style={{ opacity: 0.7, fontSize: 13 }}>Click again to see regions</p>
+          <div style={eyebrowStyle}>
+            {selectedCity ? 'CITY' : selectedRegion ? 'REGION' : 'COUNTRY'}
+          </div>
+          <h2 style={headingStyle}>
+            {selectedCity
+              ? selectedCity.properties.name
+              : selectedRegion
+              ? selectedRegion.properties.name
+              : selectedCountry.properties.ADMIN}
+          </h2>
+          {!selectedRegion && !selectedCity && !drilledIn && (
+            <p style={hintStyle}>Click again to explore regions</p>
           )}
           {facts.length > 0 ? (
-            <ul>{facts.map((f, i) => <li key={i}>{f}</li>)}</ul>
+            <ul style={factListStyle}>
+              {facts.map((f, i) => <li key={i} style={factItemStyle}>{f}</li>)}
+            </ul>
           ) : (
-            <p>No facts loaded yet — hook up the backend pipeline.</p>
+            <p style={emptyStateStyle}>No facts loaded yet — hook up the backend pipeline.</p>
           )}
         </div>
       )}
@@ -226,7 +293,6 @@ function App() {
   );
 }
 
-// Rough centroid from polygon coordinates (good enough for camera framing)
 function getCentroid(feature) {
   const coords = feature.geometry.type === 'Polygon'
     ? feature.geometry.coordinates[0]
@@ -239,6 +305,8 @@ function getCentroid(feature) {
   ];
 }
 
+const ALPHABET = Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i));
+
 const panelStyle = {
   position: 'absolute',
   top: 20,
@@ -246,38 +314,162 @@ const panelStyle = {
   width: 320,
   maxHeight: '80vh',
   overflowY: 'auto',
-  background: 'rgba(20, 20, 20, 0.85)',
-  color: 'white',
-  padding: '16px 20px',
-  borderRadius: 12,
-  fontFamily: 'sans-serif',
+  background: '#0F2440',
+  border: '1px solid #2A4A6E',
+  color: '#EDE6D6',
+  padding: '20px 24px',
+  borderRadius: 4,
+  fontFamily: "'Space Grotesk', sans-serif",
+  boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
 };
 
-const ALPHABET = Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i));
+const panelAccentBar = {
+  position: 'absolute',
+  top: 0,
+  left: 0,
+  right: 0,
+  height: 3,
+  background: 'linear-gradient(90deg, #D4A24C, transparent)',
+};
+
+const eyebrowStyle = {
+  fontSize: 11,
+  letterSpacing: '0.12em',
+  color: '#D4A24C',
+  fontWeight: 500,
+  marginTop: 4,
+  marginBottom: 4,
+};
+
+const headingStyle = {
+  fontFamily: "'Fraunces', serif",
+  fontSize: 28,
+  fontWeight: 500,
+  margin: '0 0 12px 0',
+  color: '#EDE6D6',
+  lineHeight: 1.15,
+};
+
+const backButtonStyle = {
+  background: 'none',
+  border: 'none',
+  color: '#7FA8C9',
+  fontFamily: "'Space Grotesk', sans-serif",
+  fontSize: 13,
+  cursor: 'pointer',
+  padding: 0,
+  marginBottom: 10,
+  display: 'block',
+};
+
+const hintStyle = {
+  opacity: 0.65,
+  fontSize: 13,
+  fontStyle: 'italic',
+  color: '#7FA8C9',
+  margin: '0 0 12px 0',
+};
+
+const factListStyle = {
+  paddingLeft: 18,
+  margin: 0,
+};
+
+const factItemStyle = {
+  fontSize: 14,
+  lineHeight: 1.6,
+  marginBottom: 8,
+  color: '#EDE6D6',
+};
+
+const emptyStateStyle = {
+  fontSize: 13,
+  color: '#7FA8C9',
+  fontStyle: 'italic',
+};
 
 const sidebarStyle = {
   position: 'absolute',
   top: 0,
   left: 0,
   height: '100vh',
-  width: 44,
+  width: 56,
   display: 'flex',
   flexDirection: 'column',
+  alignItems: 'center',
   justifyContent: 'center',
-  gap: 2,
-  background: 'rgba(20, 20, 20, 0.6)',
-  padding: '8px 0',
+  gap: 1,
+  background: 'rgba(15, 36, 64, 0.7)',
+  borderRight: '1px solid #2A4A6E',
+  backdropFilter: 'blur(6px)',
+  fontFamily: "'Space Grotesk', sans-serif",
+};
+
+const sidebarLabelStyle = {
+  position: 'absolute',
+  top: 24,
+  left: '50%',
+  transform: 'translateX(-50%) rotate(-90deg)',
+  transformOrigin: 'center',
+  fontSize: 10,
+  letterSpacing: '0.2em',
+  color: '#D4A24C',
+  whiteSpace: 'nowrap',
+};
+
+const rulerRowStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+};
+
+const tickStyle = {
+  width: 6,
+  height: 1,
+  background: '#D4A24C',
 };
 
 const letterButtonStyle = {
   border: 'none',
-  color: 'white',
-  fontSize: 12,
-  fontFamily: 'sans-serif',
+  fontSize: 11,
+  fontFamily: "'Space Grotesk', sans-serif",
   cursor: 'pointer',
-  padding: '3px 0',
-  borderRadius: 4,
-  margin: '0 4px',
+  width: 22,
+  height: 18,
+  borderRadius: 3,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  transition: 'background 0.15s ease',
 };
+
+// Small vertical pill toggle, styled to sit above the letter ruler as its own control
+const cityToggleStyle = (active) => ({
+  writingMode: 'vertical-rl',
+  textOrientation: 'mixed',
+  border: `1px solid ${active ? '#D4A24C' : '#2A4A6E'}`,
+  background: active ? 'rgba(212, 162, 76, 0.12)' : 'transparent',
+  color: active ? '#D4A24C' : '#7FA8C9',
+  fontFamily: "'Space Grotesk', sans-serif",
+  fontSize: 9,
+  letterSpacing: '0.1em',
+  cursor: 'pointer',
+  borderRadius: 3,
+  padding: '10px 4px',
+  marginBottom: 16,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  gap: 6,
+  transition: 'all 0.15s ease',
+});
+
+const cityToggleDotStyle = (active) => ({
+  width: 5,
+  height: 5,
+  borderRadius: '50%',
+  background: active ? '#D4A24C' : '#3A5A7E',
+  flexShrink: 0,
+});
 
 export default App;
