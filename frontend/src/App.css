@@ -188,7 +188,7 @@
 html, body {
   margin: 0;
   padding: 0;
-  overflow: hidden; /* the globe fills the viewport - nothing should ever need to scroll */
+  overflow: hidden; 
   background: #050B14;
 }
 

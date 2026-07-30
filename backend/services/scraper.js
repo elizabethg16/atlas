@@ -1,9 +1,11 @@
 const cheerio = require('cheerio');
 
+const SKIP_SECTIONS = ['history', 'etymology', 'toponymy', 'government', 'politics',];
+const PRIORITY_SECTIONS = ['economy', 'demographics', 'culture', 'society', 'sports', 'geography', 'climate'];
+
 /**
- * Fetches a Wikipedia article and extracts its main body text.
- * Strips citations, style/script tags, and navigation - keeps just readable prose,
- * since that's what we want to feed the summarizer, not markup noise.
+ * Fetches a Wikipedia article and extracts body text, organized by section,
+ * skipping history/etymology and prioritizing modern-content sections.
  */
 async function scrapeWikipediaArticle(title) {
   const url = `https://en.wikipedia.org/wiki/${encodeURIComponent(title)}`;
@@ -17,26 +19,50 @@ async function scrapeWikipediaArticle(title) {
 
   const html = await res.text();
   const $ = cheerio.load(html);
-
-  // Remove inline <style>/<script> content before extracting text, or CSS rules
-  // leak into the scraped paragraphs (Cheerio's .text() includes them otherwise)
   $('style, script').remove();
 
-  // Use a descendant selector, not a direct-child one - Wikipedia's current skin
-  // (Vector 2022) nests paragraphs inside <section> wrappers, so they're no longer
-  // direct children of .mw-parser-output
-  const paragraphs = [];
-  $('#mw-content-text .mw-parser-output p').each((_, el) => {
-    const text = $(el).text().trim();
-    // Strip citation markers like [1], [23]
-    const cleaned = text.replace(/\[\d+\]/g, '').trim();
-    if (cleaned.length > 40) paragraphs.push(cleaned); // skip near-empty stub paragraphs
+  const elements = $('#mw-content-text .mw-parser-output h2, #mw-content-text .mw-parser-output p');
+
+  const sections = { intro: [] };
+  let currentSection = 'intro';
+
+  elements.each((_, el) => {
+    const $el = $(el);
+
+    // Use .is() rather than reading el.tagName directly - tagName isn't
+    // reliably present on Cheerio's underlying DOM nodes across versions
+    // (this silently broke the whole extraction last time - every element
+    // fell through with tag === undefined, so nothing got collected at all)
+    if ($el.is('h2')) {
+      const headingText = $el.text().trim();
+      currentSection = headingText.toLowerCase();
+      if (!sections[currentSection]) sections[currentSection] = [];
+    } else if ($el.is('p')) {
+      const text = $el.text().trim().replace(/\[\d+\]/g, '').trim();
+      if (text.length > 40) {
+        sections[currentSection] = sections[currentSection] || [];
+        sections[currentSection].push(text);
+      }
+    }
   });
+
+  const isSkipped = (name) => SKIP_SECTIONS.some((s) => name.includes(s));
+  const isPriority = (name) => PRIORITY_SECTIONS.some((s) => name.includes(s));
+
+  const orderedSectionNames = Object.keys(sections).filter((name) => name !== 'intro');
+  const priorityNames = orderedSectionNames.filter((name) => !isSkipped(name) && isPriority(name));
+  const remainingNames = orderedSectionNames.filter((name) => !isSkipped(name) && !isPriority(name));
+
+  const orderedParagraphs = [
+    ...sections.intro,
+    ...priorityNames.flatMap((name) => sections[name]),
+    ...remainingNames.flatMap((name) => sections[name]),
+  ];
 
   return {
     title,
     url,
-    text: paragraphs.join('\n\n'),
+    text: orderedParagraphs.join('\n\n'),
   };
 }
 

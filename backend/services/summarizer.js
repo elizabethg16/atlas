@@ -23,7 +23,7 @@ VOICE RULES:
 - Each fact should be a single, standalone sentence - no more than ~25 words.
 - Rephrase in your own words rather than copying sentences verbatim from the source.
 
-Extract up to ${count} facts that a curious, well-informed traveler wouldn't already know. Prefer unusual history, specific records, or distinctive geography over generic statistics.
+Extract up to ${count} facts that a curious, well-informed traveler wouldn't already know. Prefer facts about the modern society, distinctive geography, or interesting things that might interest tourists over generic statistics.
 
 Respond with ONLY a JSON array of strings, no other text, no markdown formatting.
 
