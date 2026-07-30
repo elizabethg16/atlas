@@ -2,9 +2,9 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import Globe from 'react-globe.gl';
 import './App.css';
 
-function cityStableId(props) {
-  const slug = props.name?.toLowerCase().replace(/[^a-z0-9]+/g, '-') ?? 'unknown';
-  return `${props.adm0_a3}-${slug}`;
+function stableId(adm0a3, name) {
+  const slug = name?.toLowerCase().replace(/[^a-z0-9]+/g, '-') ?? 'unknown';
+  return `${adm0a3}-${slug}`;
 }
 
 function App() {
@@ -18,8 +18,9 @@ function App() {
   const [selectedCity, setSelectedCity] = useState(null);
   const [selectedLetter, setSelectedLetter] = useState(null);
   const [drilledIn, setDrilledIn] = useState(false);
-  const [showCities, setShowCities] = useState(true); // master on/off switch for the city layer
+  const [showCities, setShowCities] = useState(true);
   const [facts, setFacts] = useState([]);
+  const [sourceUrl, setSourceUrl] = useState(null);
 
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}countries.geojson`)
@@ -78,7 +79,6 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCountry, drilledIn, selectedLetter, admin1]);
 
-  
   const letterMatchedCities = useMemo(() => {
     if (!selectedLetter || !showCities) return [];
     return cities.features.filter(
@@ -110,8 +110,11 @@ function App() {
 
     fetch(`http://localhost:3001/api/countries/${country.properties.ISO_A2}/facts`)
       .then(res => res.json())
-      .then(data => setFacts(data.facts))
-      .catch(() => setFacts([]));
+      .then(data => {
+        setFacts(data.facts);
+        setSourceUrl(data.sourceUrl || null);
+      })
+      .catch(() => { setFacts([]); setSourceUrl(null); });
   };
 
   const handleRegionClick = (region) => {
@@ -128,10 +131,14 @@ function App() {
       globeRef.current.pointOfView({ lat: coords[1], lng: coords[0], altitude: 0.5 }, 1000);
     }
 
-    fetch(`http://localhost:3001/api/regions/${region.properties.iso_3166_2}/facts`)
+    const id = stableId(region.properties.adm0_a3, region.properties.name);
+    fetch(`http://localhost:3001/api/regions/${id}/facts`)
       .then(res => res.json())
-      .then(data => setFacts(data.facts))
-      .catch(() => setFacts([]));
+      .then(data => {
+        setFacts(data.facts);
+        setSourceUrl(data.sourceUrl || null);
+      })
+      .catch(() => { setFacts([]); setSourceUrl(null); });
   };
 
   const handleCityClick = (city) => {
@@ -147,10 +154,14 @@ function App() {
       globeRef.current.pointOfView({ lat, lng, altitude: 0.3 }, 1000);
     }
 
-    fetch(`http://localhost:3001/api/cities/${cityStableId(city.properties)}/facts`)
+    const id = stableId(city.properties.adm0_a3, city.properties.name);
+    fetch(`http://localhost:3001/api/cities/${id}/facts`)
       .then(res => res.json())
-      .then(data => setFacts(data.facts))
-      .catch(() => setFacts([]));
+      .then(data => {
+        setFacts(data.facts);
+        setSourceUrl(data.sourceUrl || null);
+      })
+      .catch(() => { setFacts([]); setSourceUrl(null); });
   };
 
   const handleBackToCountry = () => {
@@ -168,6 +179,7 @@ function App() {
     setSelectedCity(null);
     setDrilledIn(false);
     setFacts([]);
+    setSourceUrl(null);
   };
 
   const COUNTRY_ALT = 0.006;
@@ -277,9 +289,16 @@ function App() {
             <p style={hintStyle}>Click again to explore regions</p>
           )}
           {facts.length > 0 ? (
-            <ul style={factListStyle}>
-              {facts.map((f, i) => <li key={i} style={factItemStyle}>{f}</li>)}
-            </ul>
+            <>
+              <ul style={factListStyle}>
+                {facts.map((f, i) => <li key={i} style={factItemStyle}>{f}</li>)}
+              </ul>
+              {sourceUrl && (
+                <a href={sourceUrl} target="_blank" rel="noopener noreferrer" style={sourceLinkStyle}>
+                  Source: Wikipedia ↗
+                </a>
+              )}
+            </>
           ) : (
             <p style={emptyStateStyle}>No facts loaded yet — hook up the backend pipeline.</p>
           )}
@@ -382,6 +401,17 @@ const emptyStateStyle = {
   fontSize: 13,
   color: '#7FA8C9',
   fontStyle: 'italic',
+};
+
+const sourceLinkStyle = {
+  display: 'inline-block',
+  marginTop: 14,
+  fontSize: 12,
+  color: '#7FA8C9',
+  textDecoration: 'none',
+  borderTop: '1px solid #2A4A6E',
+  paddingTop: 10,
+  width: '100%',
 };
 
 const sidebarStyle = {
