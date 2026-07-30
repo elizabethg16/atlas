@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import Globe from 'react-globe.gl';
 import './App.css';
 
+const API_URL = import.meta.env.VITE_API_URL;
+
 function stableId(adm0a3, name) {
   const slug = name?.toLowerCase().replace(/[^a-z0-9]+/g, '-') ?? 'unknown';
   return `${adm0a3}-${slug}`;
@@ -108,7 +110,7 @@ function App() {
       globeRef.current.pointOfView({ lat: coords[1], lng: coords[0], altitude: 1.5 }, 1000);
     }
 
-    fetch(`http://localhost:3001/api/countries/${country.properties.ISO_A2}/facts`)
+    fetch(`${API_URL}/api/countries/${country.properties.ISO_A2}/facts`)
       .then(res => res.json())
       .then(data => {
         setFacts(data.facts);
@@ -132,7 +134,7 @@ function App() {
     }
 
     const id = stableId(region.properties.adm0_a3, region.properties.name);
-    fetch(`http://localhost:3001/api/regions/${id}/facts`)
+    fetch(`${API_URL}/api/regions/${id}/facts`)
       .then(res => res.json())
       .then(data => {
         setFacts(data.facts);
@@ -155,7 +157,7 @@ function App() {
     }
 
     const id = stableId(city.properties.adm0_a3, city.properties.name);
-    fetch(`http://localhost:3001/api/cities/${id}/facts`)
+    fetch(`${API_URL}/api/cities/${id}/facts`)
       .then(res => res.json())
       .then(data => {
         setFacts(data.facts);
