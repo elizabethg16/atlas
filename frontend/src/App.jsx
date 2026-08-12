@@ -302,7 +302,7 @@ function App() {
               )}
             </>
           ) : (
-            <p style={emptyStateStyle}>No facts loaded yet — hook up the backend pipeline.</p>
+            <p style={emptyStateStyle}> </p>
           )}
         </div>
       )}

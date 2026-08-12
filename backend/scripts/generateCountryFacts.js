@@ -54,7 +54,7 @@ async function main() {
   const geojson = JSON.parse(fs.readFileSync(geojsonPath, 'utf-8'));
 
   // partial
-  const countries = geojson.features.slice(1, 5);
+  const countries = geojson.features.slice(10);
 
   for (const feature of countries) {
     const name = feature.properties.ADMIN;
