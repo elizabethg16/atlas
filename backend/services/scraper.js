@@ -8,7 +8,7 @@ const PRIORITY_SECTIONS = ['economy', 'demographics', 'culture', 'society', 'spo
  * skipping history/etymology and prioritizing modern-content sections.
  */
 async function scrapeWikipediaArticle(title) {
-  const url = `https://en.wikipedia.org/wiki/${encodeURIComponent(title)}`;
+  const url = `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`;
   const res = await fetch(url, {
     headers: { 'User-Agent': 'CountryFactsApp/1.0 (educational project)' },
   });

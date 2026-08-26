@@ -1,4 +1,4 @@
-require('dotenv/config');
+require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 const fs = require('fs');
 const path = require('path');
 const db = require('../db');
@@ -17,18 +17,39 @@ const deleteExisting = db.prepare(`
   DELETE FROM facts WHERE entity_type = 'region' AND entity_id = ?
 `);
 
+async function tryFetchRegionArticle(regionName, countryName) {
+  const attempts = [
+    `${regionName}, ${countryName}`,
+    `${regionName} Province`,
+    `${regionName} Region`,
+    regionName, 
+  ];
+
+  for (const title of attempts) {
+    try {
+      const article = await scrapeWikipediaArticle(title);
+      if (article.text && article.text.length > 200) {
+        return article;
+      }
+    } catch (err) {
+      // failed
+    }
+  }
+
+  return null; // all failed
+}
+
 async function generateForRegion(regionName, countryName, id) {
-  const searchTitle = `${regionName}, ${countryName}`;
-  console.log(`Processing ${searchTitle}...`);
+  console.log(`Processing ${regionName}, ${countryName}...`);
 
   try {
-    const article = await scrapeWikipediaArticle(searchTitle);
-    if (!article.text || article.text.length < 200) {
-      console.warn(`  Skipped - article too short or not found`);
+    const article = await tryFetchRegionArticle(regionName, countryName);
+    if (!article) {
+      console.warn(`  Skipped - no matching Wikipedia article found after trying variations`);
       return;
     }
 
-    const facts = await extractFacts(searchTitle, article.text);
+    const facts = await extractFacts(`${regionName}, ${countryName}`, article.text);
 
     const insertMany = db.transaction((factList) => {
       deleteExisting.run(id);
@@ -46,12 +67,12 @@ async function generateForRegion(regionName, countryName, id) {
 
     console.log(`  Saved ${facts.length} facts`);
   } catch (err) {
-    console.error(`  Failed for ${searchTitle}:`, err.message);
+    console.error(`  Failed for ${regionName}, ${countryName}:`, err.message);
   }
 }
 
 async function main() {
-  const admin1Path = path.join(__dirname, '../../data/admin1.geojson');
+  const admin1Path = path.join(__dirname, '../../data/admin1_v2.geojson');
   const countriesPath = path.join(__dirname, '../../data/countries.geojson');
 
   const admin1 = JSON.parse(fs.readFileSync(admin1Path, 'utf-8'));
@@ -62,7 +83,7 @@ async function main() {
     countryNameByCode[f.properties.ADM0_A3] = f.properties.ADMIN;
   });
 
-  const regions = admin1.features.slice(0, 5);
+  const regions = admin1.features.slice(6, 10);
 
   for (const feature of regions) {
     const regionName = feature.properties.name;
