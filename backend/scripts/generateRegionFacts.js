@@ -83,7 +83,7 @@ async function main() {
     countryNameByCode[f.properties.ADM0_A3] = f.properties.ADMIN;
   });
 
-  const regions = admin1.features.slice(6, 10);
+  const regions = admin1.features.slice(40);
 
   for (const feature of regions) {
     const regionName = feature.properties.name;

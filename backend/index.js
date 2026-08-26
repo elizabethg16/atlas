@@ -13,8 +13,6 @@ const getFactsStmt = db.prepare(`
   ORDER BY id
 `);
 
-// All facts for a given entity share the same source article, so we just
-// take the first row's source_url as the entity's single citation link
 function buildResponse(rows) {
   return {
     facts: rows.map((r) => r.fact),
