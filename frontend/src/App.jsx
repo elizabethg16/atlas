@@ -400,16 +400,14 @@ function App() {
           MULTI
         </button>
 
-        {selectionMode === 'multi' && (
-          <button
+        <button
             onClick={() => setOnlyIntersections((v) => !v)}
             style={cityToggleStyle(onlyIntersections)}
             title={onlyIntersections ? 'Show all matches' : 'Show only cross-letter matches'}
           >
             <span style={cityToggleDotStyle(onlyIntersections)} />
             OVERLAP
-          </button>
-        )}
+        </button>
 
         {ALPHABET.map((letter) => {
           const isSelected = selectedLetters.includes(letter);
