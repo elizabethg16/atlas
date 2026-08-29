@@ -19,7 +19,7 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-function blendHexColors(hexA, hexB, alpha) {
+function blendTwoColors(hexA, hexB, alpha) {
   const parse = (hex) => {
     const clean = hex.replace('#', '');
     return {
@@ -45,9 +45,10 @@ function App() {
   const [selectedCountry, setSelectedCountry] = useState(null);
   const [selectedRegion, setSelectedRegion] = useState(null);
   const [selectedCity, setSelectedCity] = useState(null);
-  const [selectedLetters, setSelectedLetters] = useState([]); 
-  const [letterColors, setLetterColors] = useState({}); 
-  const [selectionMode, setSelectionMode] = useState('single'); 
+  const [selectedLetters, setSelectedLetters] = useState([]);
+  const [letterColors, setLetterColors] = useState({});
+  const [selectionMode, setSelectionMode] = useState('single');
+  const [onlyIntersections, setOnlyIntersections] = useState(false);
   const [drilledIn, setDrilledIn] = useState(false);
   const [showCities, setShowCities] = useState(true);
   const [facts, setFacts] = useState([]);
@@ -98,36 +99,14 @@ function App() {
     });
   };
 
-  const ownRegions = selectedCountry && drilledIn
-    ? admin1.features.filter(
-        (r) => r.properties.adm0_a3 === selectedCountry.properties.ADM0_A3
-      )
-    : [];
-
-  // Union match
-  const letterMatchedRegions = useMemo(() => {
-    if (selectedLetters.length === 0) return [];
-    return admin1.features.filter((r) => {
-      const rLetter = r.properties.name?.[0]?.toUpperCase();
-      if (!selectedLetters.includes(rLetter)) return false;
-      if (selectedLetters.length === 1) {
-        const parentLetter = parentCountryLetter(r.properties.adm0_a3);
-        if (parentLetter === rLetter) return false;
-      }
-      return true;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [admin1, selectedLetters, countryByCode]);
-
-  const displayedRegions = useMemo(() => {
-    const map = new Map();
-    [...ownRegions, ...letterMatchedRegions].forEach((r) => {
-      const key = `${r.properties.adm0_a3}-${r.properties.name}`;
-      map.set(key, r);
-    });
-    return Array.from(map.values());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCountry, drilledIn, selectedLetters, admin1]);
+  const applyEntityLetter = (letter) => {
+    ensureColorForLetter(letter);
+    if (selectionMode === 'single') {
+      setSelectedLetters([letter]);
+    } else {
+      setSelectedLetters((prev) => (prev.includes(letter) ? prev : [...prev, letter]));
+    }
+  };
 
   const isIntersectionMatch = (props) => {
     if (selectedLetters.length < 2) return false;
@@ -140,13 +119,55 @@ function App() {
     );
   };
 
+  const ownRegions = selectedCountry && drilledIn
+    ? admin1.features.filter(
+        (r) => r.properties.adm0_a3 === selectedCountry.properties.ADM0_A3
+      )
+    : [];
+
+  const letterMatchedRegions = useMemo(() => {
+    if (selectedLetters.length === 0) return [];
+    const filterOnlyIntersections = onlyIntersections && selectedLetters.length >= 2;
+
+    return admin1.features.filter((r) => {
+      const rLetter = r.properties.name?.[0]?.toUpperCase();
+      if (!selectedLetters.includes(rLetter)) return false;
+
+      if (filterOnlyIntersections) {
+        return isIntersectionMatch(r.properties);
+      }
+
+      if (selectedLetters.length === 1) {
+        const parentLetter = parentCountryLetter(r.properties.adm0_a3);
+        if (parentLetter === rLetter) return false;
+      }
+      return true;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [admin1, selectedLetters, countryByCode, onlyIntersections]);
+
+  const displayedRegions = useMemo(() => {
+    const map = new Map();
+    [...ownRegions, ...letterMatchedRegions].forEach((r) => {
+      const key = `${r.properties.adm0_a3}-${r.properties.name}`;
+      map.set(key, r);
+    });
+    return Array.from(map.values());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCountry, drilledIn, selectedLetters, admin1, onlyIntersections]);
+
   const letterMatchedCities = useMemo(() => {
     if (selectedLetters.length === 0 || !showCities) return [];
-    return cities.features.filter((c) =>
-      selectedLetters.includes(c.properties.name?.[0]?.toUpperCase())
-    );
+    const filterOnlyIntersections = onlyIntersections && selectedLetters.length >= 2;
+
+    return cities.features.filter((c) => {
+      const matches = selectedLetters.includes(c.properties.name?.[0]?.toUpperCase());
+      if (!matches) return false;
+      if (filterOnlyIntersections) return isIntersectionMatch(c.properties);
+      return true;
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cities, selectedLetters, showCities]);
+  }, [cities, selectedLetters, showCities, onlyIntersections]);
 
   const handleCountryClick = (country) => {
     const isSameCountry = selectedCountry && selectedCountry.properties.ADM0_A3 === country.properties.ADM0_A3;
@@ -164,9 +185,7 @@ function App() {
     setSelectedCity(null);
     setDrilledIn(false);
 
-    const letter = country.properties.ADMIN?.[0]?.toUpperCase();
-    setSelectedLetters([letter]);
-    ensureColorForLetter(letter);
+    applyEntityLetter(country.properties.ADMIN?.[0]?.toUpperCase());
 
     if (globeRef.current) {
       const coords = getCentroid(country);
@@ -187,9 +206,7 @@ function App() {
     setSelectedCity(null);
     setDrilledIn(true);
 
-    const letter = region.properties.name?.[0]?.toUpperCase();
-    setSelectedLetters([letter]);
-    ensureColorForLetter(letter);
+    applyEntityLetter(region.properties.name?.[0]?.toUpperCase());
 
     const parentCountry = countryByCode[region.properties.adm0_a3];
     if (parentCountry) setSelectedCountry(parentCountry);
@@ -212,9 +229,7 @@ function App() {
   const handleCityClick = (city) => {
     setSelectedCity(city);
 
-    const letter = city.properties.name?.[0]?.toUpperCase();
-    setSelectedLetters([letter]);
-    ensureColorForLetter(letter);
+    applyEntityLetter(city.properties.name?.[0]?.toUpperCase());
 
     const parentCountry = countryByCode[city.properties.adm0_a3];
     if (parentCountry) setSelectedCountry(parentCountry);
@@ -239,12 +254,10 @@ function App() {
     setSelectedRegion(null);
     setSelectedCity(null);
     if (selectedCountry) {
-      const letter = selectedCountry.properties.ADMIN?.[0]?.toUpperCase();
-      setSelectedLetters([letter]);
-      ensureColorForLetter(letter);
+      applyEntityLetter(selectedCountry.properties.ADMIN?.[0]?.toUpperCase());
     }
   };
-  
+
   const handleLetterClick = (letter) => {
     ensureColorForLetter(letter);
 
@@ -266,6 +279,7 @@ function App() {
 
   const handleModeToggle = () => {
     setSelectionMode((prev) => (prev === 'single' ? 'multi' : 'single'));
+    setOnlyIntersections(false);
     setSelectedLetters([]);
     setSelectedCountry(null);
     setSelectedRegion(null);
@@ -288,24 +302,27 @@ function App() {
     return letterMatches ? REGION_ALT + 0.003 : REGION_ALT;
   };
 
+  const suppressCountryHighlight = onlyIntersections && selectedLetters.length >= 2;
+
   const getCapColor = (d) => {
     const isRegion = isRegionFeature(d);
 
     if (isRegion) {
-      if (d === selectedRegion) return 'rgba(255, 200, 50, 0.9)';
 
       const rLetter = letterOf(d);
       if (isIntersectionMatch(d.properties)) {
         const countryLetter = parentCountryLetter(d.properties.adm0_a3);
         const colorA = letterColors[rLetter] || '#ff6432';
         const colorB = letterColors[countryLetter] || '#ff6432';
-        return blendHexColors(colorA, colorB, 0.85);
+        return blendTwoColors(colorA, colorB, 0.9);
       }
       if (selectedLetters.includes(rLetter)) {
         return hexToRgba(letterColors[rLetter] || '#ff6432', 0.75);
       }
       return 'rgba(255, 255, 255, 0.25)';
     }
+
+    if (suppressCountryHighlight) return 'rgba(200, 200, 200, 0.3)';
 
     const cLetter = letterOf(d);
     if (selectedLetters.includes(cLetter)) {
@@ -315,20 +332,25 @@ function App() {
   };
 
   const getPointColor = (d) => {
-    if (d === selectedCity) return '#FFD700';
 
     const letter = d.properties.name?.[0]?.toUpperCase();
     if (isIntersectionMatch(d.properties)) {
       const countryLetter = parentCountryLetter(d.properties.adm0_a3);
       const colorA = letterColors[letter] || '#D4A24C';
       const colorB = letterColors[countryLetter] || '#D4A24C';
-      return blendHexColors(colorA, colorB, 1);
+      return blendTwoColors(colorA, colorB, 1);
     }
     return letterColors[letter] || '#D4A24C';
   };
 
   const getPointRadius = (d) =>
     d === selectedCity ? 0.55 : 0.35;
+
+  const locationBreadcrumb = selectedCity
+    ? [selectedCity.properties.adm1name, selectedCountry?.properties.ADMIN].filter(Boolean).join(', ')
+    : selectedRegion
+    ? selectedCountry?.properties.ADMIN || ''
+    : '';
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100vh', overflow: 'hidden', background: '#050B14' }}>
@@ -358,7 +380,7 @@ function App() {
       />
 
       <div style={sidebarStyle}>
-        <div style={sidebarLabelStyle}>INDEX</div>
+      
 
         <button
           onClick={() => setShowCities((v) => !v)}
@@ -377,6 +399,17 @@ function App() {
           <span style={cityToggleDotStyle(selectionMode === 'multi')} />
           MULTI
         </button>
+
+        {selectionMode === 'multi' && (
+          <button
+            onClick={() => setOnlyIntersections((v) => !v)}
+            style={cityToggleStyle(onlyIntersections)}
+            title={onlyIntersections ? 'Show all matches' : 'Show only cross-letter matches'}
+          >
+            <span style={cityToggleDotStyle(onlyIntersections)} />
+            OVERLAP
+          </button>
+        )}
 
         {ALPHABET.map((letter) => {
           const isSelected = selectedLetters.includes(letter);
@@ -427,6 +460,9 @@ function App() {
               ? selectedRegion.properties.name
               : selectedCountry.properties.ADMIN}
           </h2>
+          {locationBreadcrumb && (
+            <p style={breadcrumbStyle}>{locationBreadcrumb}</p>
+          )}
           {!selectedRegion && !selectedCity && !drilledIn && (
             <p style={hintStyle}>Click again to explore regions</p>
           )}
@@ -442,11 +478,7 @@ function App() {
               )}
             </>
           ) : (
-            <p style={emptyStateStyle}>
-              {selectedCity
-                ? `${selectedCity.properties.name}, ${selectedCity.properties.adm1name || ''}${selectedCity.properties.adm1name ? ', ' : ''}${selectedCountry?.properties.ADMIN || ''}`
-                : ' '}
-            </p>
+            <p style={emptyStateStyle}>No facts available yet.</p>
           )}
         </div>
       )}
@@ -506,9 +538,15 @@ const headingStyle = {
   fontFamily: "'Fraunces', serif",
   fontSize: 28,
   fontWeight: 500,
-  margin: '0 0 12px 0',
+  margin: '0 0 4px 0',
   color: '#EDE6D6',
   lineHeight: 1.15,
+};
+
+const breadcrumbStyle = {
+  fontSize: 13,
+  color: '#7FA8C9',
+  margin: '0 0 14px 0',
 };
 
 const backButtonStyle = {
