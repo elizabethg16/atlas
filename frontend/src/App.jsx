@@ -39,6 +39,8 @@ function blendTwoColors(hexA, hexB, alpha) {
 function App() {
   const globeRef = useRef();
 
+  const [hasEntered, setHasEntered] = useState(false);
+
   const [countries, setCountries] = useState({ features: [] });
   const [admin1, setAdmin1] = useState({ features: [] });
   const [cities, setCities] = useState({ features: [] });
@@ -72,6 +74,15 @@ function App() {
     fetch(`${import.meta.env.BASE_URL}cities.geojson`)
       .then(res => res.json())
       .then(data => setCities(data));
+  }, []);
+
+  // Slow ambient auto-rotation on the globe - runs from first mount, so it's
+  // already spinning during the intro screen and continues afterward too
+  useEffect(() => {
+    if (globeRef.current) {
+      globeRef.current.controls().autoRotate = true;
+      globeRef.current.controls().autoRotateSpeed = 0.4;
+    }
   }, []);
 
   const countryByCode = useMemo(() => {
@@ -308,7 +319,6 @@ function App() {
     const isRegion = isRegionFeature(d);
 
     if (isRegion) {
-
       const rLetter = letterOf(d);
       if (isIntersectionMatch(d.properties)) {
         const countryLetter = parentCountryLetter(d.properties.adm0_a3);
@@ -332,7 +342,6 @@ function App() {
   };
 
   const getPointColor = (d) => {
-
     const letter = d.properties.name?.[0]?.toUpperCase();
     if (isIntersectionMatch(d.properties)) {
       const countryLetter = parentCountryLetter(d.properties.adm0_a3);
@@ -358,7 +367,7 @@ function App() {
         ref={globeRef}
         globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
         backgroundColor="#050B14"
-        polygonsData={[...countries.features, ...displayedRegions]}
+        polygonsData={hasEntered ? [...countries.features, ...displayedRegions] : []}
         polygonCapColor={getCapColor}
         polygonAltitude={getAltitude}
         polygonSideColor={() => 'rgba(0, 100, 200, 0.15)'}
@@ -368,7 +377,7 @@ function App() {
           isRegionFeature(d) ? handleRegionClick(d) : handleCountryClick(d);
         }}
         polygonsTransitionDuration={300}
-        pointsData={letterMatchedCities}
+        pointsData={hasEntered ? letterMatchedCities : []}
         pointLat={(d) => d.geometry.coordinates[1]}
         pointLng={(d) => d.geometry.coordinates[0]}
         pointColor={getPointColor}
@@ -379,106 +388,129 @@ function App() {
         onPointClick={handleCityClick}
       />
 
-      <div style={sidebarStyle}>
-      
+      {!hasEntered && (
+        <div style={introOverlayStyle} onClick={() => setHasEntered(true)}>
+          <svg viewBox="0 0 500 500" style={orbitSvgStyle}>
+            <defs>
+              <path id="orbitPath" d="M 250,250 m -200,0 a 200,200 0 1,1 400,0 a 200,200 0 1,1 -400,0" />
+            </defs>
+            <text style={orbitTextStyle}>
+              <textPath href="#orbitPath" startOffset="0%">
+                What if you could only go to places that started with the letter...
+              </textPath>
+            </text>
+          </svg>
 
-        <button
-          onClick={() => setShowCities((v) => !v)}
-          style={cityToggleStyle(showCities)}
-          title={showCities ? 'Hide cities' : 'Show cities'}
-        >
-          <span style={cityToggleDotStyle(showCities)} />
-          CITIES
-        </button>
+          <div style={beginLabelStyle}>begin</div>
+        </div>
+      )}
 
-        <button
-          onClick={handleModeToggle}
-          style={cityToggleStyle(selectionMode === 'multi')}
-          title={selectionMode === 'multi' ? 'Switch to single-select' : 'Switch to multi-select'}
-        >
-          <span style={cityToggleDotStyle(selectionMode === 'multi')} />
-          MULTI
-        </button>
+      {hasEntered && (
+        <>
+          <div style={sidebarStyle}>
+            <div style={sidebarLabelStyle}>INDEX</div>
 
-        <button
-            onClick={() => setOnlyIntersections((v) => !v)}
-            style={cityToggleStyle(onlyIntersections)}
-            title={onlyIntersections ? 'Show all matches' : 'Show only cross-letter matches'}
-          >
-            <span style={cityToggleDotStyle(onlyIntersections)} />
-            OVERLAP
-        </button>
+            <button
+              onClick={() => setShowCities((v) => !v)}
+              style={cityToggleStyle(showCities)}
+              title={showCities ? 'Hide cities' : 'Show cities'}
+            >
+              <span style={cityToggleDotStyle(showCities)} />
+              CITIES
+            </button>
 
-        {ALPHABET.map((letter) => {
-          const isSelected = selectedLetters.includes(letter);
-          const color = letterColors[letter] || '#ff6432';
-          return (
-            <div key={letter} style={rulerRowStyle}>
-              <div style={{ ...tickStyle, opacity: isSelected ? 1 : 0.25 }} />
+            <button
+              onClick={handleModeToggle}
+              style={cityToggleStyle(selectionMode === 'multi')}
+              title={selectionMode === 'multi' ? 'Switch to single-select' : 'Switch to multi-select'}
+            >
+              <span style={cityToggleDotStyle(selectionMode === 'multi')} />
+              MULTI
+            </button>
+
+            {selectionMode === 'multi' && (
               <button
-                onClick={() => handleLetterClick(letter)}
-                style={{
-                  ...letterButtonStyle,
-                  color: isSelected ? '#050B14' : '#7FA8C9',
-                  background: isSelected ? color : 'transparent',
-                  fontWeight: isSelected ? 600 : 400,
-                }}
+                onClick={() => setOnlyIntersections((v) => !v)}
+                style={cityToggleStyle(onlyIntersections)}
+                title={onlyIntersections ? 'Show all matches' : 'Show only cross-letter matches'}
               >
-                {letter}
+                <span style={cityToggleDotStyle(onlyIntersections)} />
+                ∩ ONLY
               </button>
-              {isSelected && (
-                <input
-                  type="color"
-                  value={color}
-                  onChange={(e) => handleColorChange(letter, e.target.value)}
-                  style={colorSwatchStyle}
-                  title={`Choose color for ${letter}`}
-                />
+            )}
+
+            {ALPHABET.map((letter) => {
+              const isSelected = selectedLetters.includes(letter);
+              const color = letterColors[letter] || '#ff6432';
+              return (
+                <div key={letter} style={rulerRowStyle}>
+                  <div style={{ ...tickStyle, opacity: isSelected ? 1 : 0.25 }} />
+                  <button
+                    onClick={() => handleLetterClick(letter)}
+                    style={{
+                      ...letterButtonStyle,
+                      color: isSelected ? '#050B14' : '#7FA8C9',
+                      background: isSelected ? color : 'transparent',
+                      fontWeight: isSelected ? 600 : 400,
+                    }}
+                  >
+                    {letter}
+                  </button>
+                  {isSelected && (
+                    <input
+                      type="color"
+                      value={color}
+                      onChange={(e) => handleColorChange(letter, e.target.value)}
+                      style={colorSwatchStyle}
+                      title={`Choose color for ${letter}`}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {(selectedCountry || selectedRegion || selectedCity) && (
+            <div style={panelStyle}>
+              <div style={panelAccentBar} />
+              {(selectedRegion || selectedCity) && (
+                <button onClick={handleBackToCountry} style={backButtonStyle}>
+                  ← {selectedCountry?.properties.ADMIN}
+                </button>
+              )}
+              <div style={eyebrowStyle}>
+                {selectedCity ? 'CITY' : selectedRegion ? 'REGION' : 'COUNTRY'}
+              </div>
+              <h2 style={headingStyle}>
+                {selectedCity
+                  ? selectedCity.properties.name
+                  : selectedRegion
+                  ? selectedRegion.properties.name
+                  : selectedCountry.properties.ADMIN}
+              </h2>
+              {locationBreadcrumb && (
+                <p style={breadcrumbStyle}>{locationBreadcrumb}</p>
+              )}
+              {!selectedRegion && !selectedCity && !drilledIn && (
+                <p style={hintStyle}>Click again to explore regions</p>
+              )}
+              {facts.length > 0 ? (
+                <>
+                  <ul style={factListStyle}>
+                    {facts.map((f, i) => <li key={i} style={factItemStyle}>{f}</li>)}
+                  </ul>
+                  {sourceUrl && (
+                    <a href={sourceUrl} target="_blank" rel="noopener noreferrer" style={sourceLinkStyle}>
+                      Source: Wikipedia ↗
+                    </a>
+                  )}
+                </>
+              ) : (
+                <p style={emptyStateStyle}>No facts available yet.</p>
               )}
             </div>
-          );
-        })}
-      </div>
-
-      {(selectedCountry || selectedRegion || selectedCity) && (
-        <div style={panelStyle}>
-          <div style={panelAccentBar} />
-          {(selectedRegion || selectedCity) && (
-            <button onClick={handleBackToCountry} style={backButtonStyle}>
-              ← {selectedCountry?.properties.ADMIN}
-            </button>
           )}
-          <div style={eyebrowStyle}>
-            {selectedCity ? 'CITY' : selectedRegion ? 'REGION' : 'COUNTRY'}
-          </div>
-          <h2 style={headingStyle}>
-            {selectedCity
-              ? selectedCity.properties.name
-              : selectedRegion
-              ? selectedRegion.properties.name
-              : selectedCountry.properties.ADMIN}
-          </h2>
-          {locationBreadcrumb && (
-            <p style={breadcrumbStyle}>{locationBreadcrumb}</p>
-          )}
-          {!selectedRegion && !selectedCity && !drilledIn && (
-            <p style={hintStyle}>Click again to explore regions</p>
-          )}
-          {facts.length > 0 ? (
-            <>
-              <ul style={factListStyle}>
-                {facts.map((f, i) => <li key={i} style={factItemStyle}>{f}</li>)}
-              </ul>
-              {sourceUrl && (
-                <a href={sourceUrl} target="_blank" rel="noopener noreferrer" style={sourceLinkStyle}>
-                  Source: Wikipedia ↗
-                </a>
-              )}
-            </>
-          ) : (
-            <p style={emptyStateStyle}>No facts available yet.</p>
-          )}
-        </div>
+        </>
       )}
     </div>
   );
@@ -497,6 +529,45 @@ function getCentroid(feature) {
 }
 
 const ALPHABET = Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i));
+
+// --- Intro / landing screen ---
+const introOverlayStyle = {
+  position: 'absolute',
+  inset: 0,
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+};
+
+const orbitSvgStyle = {
+  position: 'absolute',
+  top: '50%',
+  left: '50%',
+  width: '70vmin',
+  height: '70vmin',
+  animation: 'rotateSlow 50s linear infinite',
+};
+
+const orbitTextStyle = {
+  fill: '#EDE6D6',
+  fontFamily: "'Space Grotesk', sans-serif",
+  fontSize: '15px',
+  letterSpacing: '0.04em',
+};
+
+const beginLabelStyle = {
+  position: 'absolute',
+  bottom: '10vh',
+  left: '50%',
+  transform: 'translateX(-50%)',
+  fontFamily: "'Fraunces', serif",
+  fontSize: 22,
+  fontWeight: 500,
+  letterSpacing: '0.08em',
+  color: '#D4A24C',
+  animation: 'pulseBegin 3s ease-in-out infinite',
+};
 
 const panelStyle = {
   position: 'absolute',
