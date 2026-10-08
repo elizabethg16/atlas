@@ -20,6 +20,8 @@ function buildResponse(rows) {
   };
 }
 
+app.get('/health', (req, res) => res.send('ok'));
+
 app.get('/api/countries/:code/facts', (req, res) => {
   const rows = getFactsStmt.all('country', req.params.code);
   res.json({ country: req.params.code, ...buildResponse(rows) });

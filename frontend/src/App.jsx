@@ -59,6 +59,7 @@ function App() {
   const [showCities, setShowCities] = useState(true);
   const [facts, setFacts] = useState([]);
   const [sourceUrl, setSourceUrl] = useState(null);
+  const [isLoadingFacts, setIsLoadingFacts] = useState(false);
   const [isZoomedIn, setIsZoomedIn] = useState(false);
 
   useEffect(() => {
@@ -187,6 +188,36 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cities, selectedLetters, showCities, onlyIntersections]);
 
+  const loadFacts = (url) => {
+    const reqId = ++factsRequestRef.current;
+    setFacts([]);
+    setSourceUrl(null);
+    setIsLoadingFacts(true);
+    setSlowLoad(false);
+    const slowTimer = setTimeout(() => {
+      if (factsRequestRef.current === reqId) setSlowLoad(true);
+    }, 4000);
+    fetch(url)
+      .then(res => res.json())
+      .then(data => {
+        if (factsRequestRef.current !== reqId) return;
+        setFacts(data.facts || []);
+        setSourceUrl(data.sourceUrl || null);
+      })
+      .catch(() => {
+        if (factsRequestRef.current !== reqId) return;
+        setFacts([]);
+        setSourceUrl(null);
+      })
+      .finally(() => {
+        clearTimeout(slowTimer);
+        if (factsRequestRef.current === reqId) {
+          setIsLoadingFacts(false);
+          setSlowLoad(false);
+        }
+      });
+  };
+
   const handleCountryClick = (country) => {
     const isSameCountry = selectedCountry && selectedCountry.properties.ADM0_A3 === country.properties.ADM0_A3;
 
@@ -210,13 +241,7 @@ function App() {
       globeRef.current.pointOfView({ lat: coords[1], lng: coords[0], altitude: 1.5 }, 1000);
     }
 
-    fetch(`${API_URL}/api/countries/${country.properties.ISO_A2}/facts`)
-      .then(res => res.json())
-      .then(data => {
-        setFacts(data.facts);
-        setSourceUrl(data.sourceUrl || null);
-      })
-      .catch(() => { setFacts([]); setSourceUrl(null); });
+    loadFacts(`${API_URL}/api/countries/${country.properties.ISO_A2}/facts`);
   };
 
   const handleRegionClick = (region) => {
@@ -235,13 +260,7 @@ function App() {
     }
 
     const id = stableId(region.properties.adm0_a3, region.properties.name);
-    fetch(`${API_URL}/api/regions/${id}/facts`)
-      .then(res => res.json())
-      .then(data => {
-        setFacts(data.facts);
-        setSourceUrl(data.sourceUrl || null);
-      })
-      .catch(() => { setFacts([]); setSourceUrl(null); });
+    loadFacts(`${API_URL}/api/regions/${id}/facts`);
   };
 
   const handleCityClick = (city) => {
@@ -259,13 +278,7 @@ function App() {
     }
 
     const id = stableId(city.properties.adm0_a3, city.properties.name);
-    fetch(`${API_URL}/api/cities/${id}/facts`)
-      .then(res => res.json())
-      .then(data => {
-        setFacts(data.facts);
-        setSourceUrl(data.sourceUrl || null);
-      })
-      .catch(() => { setFacts([]); setSourceUrl(null); });
+    loadFacts(`${API_URL}/api/cities/${id}/facts`);
   };
 
   const handleBackToCountry = () => {
@@ -291,6 +304,9 @@ function App() {
     setSelectedRegion(null);
     setSelectedCity(null);
     setDrilledIn(false);
+    factsRequestRef.current++;
+    setIsLoadingFacts(false);
+    setSlowLoad(false);
     setFacts([]);
     setSourceUrl(null);
   };
@@ -303,6 +319,9 @@ function App() {
     setSelectedRegion(null);
     setSelectedCity(null);
     setDrilledIn(false);
+    factsRequestRef.current++;
+    setIsLoadingFacts(false);
+    setSlowLoad(false);
     setFacts([]);
     setSourceUrl(null);
   };
@@ -514,7 +533,18 @@ function App() {
                   )}
                 </>
               ) : (
-                <p style={emptyStateStyle}>No facts available yet.</p>
+                isLoadingFacts ? (
+                  <div style={loadingWrapStyle}>
+                    <div style={spinnerStyle} />
+                    <p style={emptyStateStyle}>
+                      {slowLoad
+                        ? 'Waking up the server — the first lookup can take a minute…'
+                        : 'Gathering facts…'}
+                    </p>
+                  </div>
+                ) : (
+                  <p style={emptyStateStyle}>No facts available yet.</p>
+                )
               )}
             </div>
           )}
@@ -656,6 +686,22 @@ const factItemStyle = {
   lineHeight: 1.6,
   marginBottom: 8,
   color: '#EDE6D6',
+};
+
+const loadingWrapStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+};
+
+const spinnerStyle = {
+  width: 16,
+  height: 16,
+  flexShrink: 0,
+  borderRadius: '50%',
+  border: '2px solid rgba(127,168,201,0.3)',
+  borderTopColor: '#7FA8C9',
+  animation: 'atlasSpin 0.8s linear infinite',
 };
 
 const emptyStateStyle = {
