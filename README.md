@@ -1,8 +1,10 @@
-began: jul 10, 2026
+*began: jul 10, 2026*
 
 
-What if you could only go places that started with the same letter?
+**What if you could only go places that started with the same letter?**
 
-In this hypothetical, you are limited to living in and visiting places that begin with the same letter.
-To keep things simple, only cities, countries, and highest level administrative divisions count. 
-Explore around your limited world!
+Explore your limited world on [https://elizabethg16.github.io/atlas/](url)
+
+Find places that begin with the same letter at the levels of country, city, or highest level administrative district. 
+
+Have a friend? See where you can meet up!
