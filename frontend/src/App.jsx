@@ -4,7 +4,11 @@ import './App.css';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-const DEFAULT_PALETTE = ['#ff6432', '#4ea8de', '#8ac926', '#ffca3a', '#c77dff', '#ff5d8f', '#38b6ff', '#f4a261'];
+// Camera altitude (in globe radii) below which the globe counts as zoomed in.
+// The default view sits at 2.5.
+const ZOOMED_IN_ALTITUDE = 2;
+
+const DEFAULT_PALETTE =['#ff6432', '#4ea8de', '#8ac926', '#ffca3a', '#c77dff', '#ff5d8f', '#38b6ff', '#f4a261'];
 
 function stableId(adm0a3, name) {
   const slug = name?.toLowerCase().replace(/[^a-z0-9]+/g, '-') ?? 'unknown';
@@ -55,6 +59,7 @@ function App() {
   const [showCities, setShowCities] = useState(true);
   const [facts, setFacts] = useState([]);
   const [sourceUrl, setSourceUrl] = useState(null);
+  const [isZoomedIn, setIsZoomedIn] = useState(false);
 
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}countries.geojson`)
@@ -77,13 +82,15 @@ function App() {
   }, []);
 
   // Slow ambient auto-rotation on the globe - runs from first mount, so it's
-  // already spinning during the intro screen and continues afterward too
+  // already spinning during the intro screen. It pauses while a location is
+  // selected or the camera is zoomed in, and resumes once both are cleared.
+  const hasSelection = !!(selectedCountry || selectedRegion || selectedCity);
   useEffect(() => {
     if (globeRef.current) {
-      globeRef.current.controls().autoRotate = true;
+      globeRef.current.controls().autoRotate = !hasSelection && !isZoomedIn;
       globeRef.current.controls().autoRotateSpeed = 0.4;
     }
-  }, []);
+  }, [hasSelection, isZoomedIn]);
 
   const countryByCode = useMemo(() => {
     const map = {};
@@ -386,6 +393,7 @@ function App() {
         pointLabel={(d) => d.properties.name}
         pointsMerge={false}
         onPointClick={handleCityClick}
+        onZoom={({ altitude }) => setIsZoomedIn(altitude < ZOOMED_IN_ALTITUDE)}
       />
 
       {!hasEntered && (
