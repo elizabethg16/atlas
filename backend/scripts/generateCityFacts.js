@@ -17,6 +17,12 @@ const deleteExisting = db.prepare(`
   DELETE FROM facts WHERE entity_type = 'city' AND entity_id = ?
 `);
 
+const existingCityIds = new Set(
+  db.prepare(`SELECT DISTINCT entity_id FROM facts WHERE entity_type = 'city'`)
+    .all()
+    .map((row) => row.entity_id)
+);
+
 async function generateForCity(cityName, countryName, id) {
   const searchTitle = `${cityName}, ${countryName}`;
   console.log(`Processing ${searchTitle}...`);
@@ -62,9 +68,16 @@ async function main() {
     countryNameByCode[f.properties.ADM0_A3] = f.properties.ADMIN;
   });
 
+  // Optional limit, e.g. `node scripts/generateCityFacts.js 50` for the 50
+  // largest cities still missing facts. Omit it to process all of them.
+  const limit = Number(process.argv[2]) || Infinity;
+
   const cityFeatures = [...cities.features]
     .sort((a, b) => (b.properties.pop_max || 0) - (a.properties.pop_max || 0))
-    .slice(0, 5);
+    .filter((f) => !existingCityIds.has(stableId(f.properties.adm0_a3, f.properties.name)))
+    .slice(0, limit);
+
+  console.log(`${existingCityIds.size} cities already have facts, ${cityFeatures.length} to process.`);
 
   for (const feature of cityFeatures) {
     const cityName = feature.properties.name;
