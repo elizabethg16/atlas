@@ -59,7 +59,7 @@ function App() {
   const [showCities, setShowCities] = useState(true);
   const [facts, setFacts] = useState([]);
   const [sourceUrl, setSourceUrl] = useState(null);
-  const [isLoadingFacts, setIsLoadingFacts] = useState(false);
+  const factsRequestRef = useRef(0);
   const [isZoomedIn, setIsZoomedIn] = useState(false);
 
   useEffect(() => {
@@ -192,11 +192,6 @@ function App() {
     const reqId = ++factsRequestRef.current;
     setFacts([]);
     setSourceUrl(null);
-    setIsLoadingFacts(true);
-    setSlowLoad(false);
-    const slowTimer = setTimeout(() => {
-      if (factsRequestRef.current === reqId) setSlowLoad(true);
-    }, 4000);
     fetch(url)
       .then(res => res.json())
       .then(data => {
@@ -208,13 +203,6 @@ function App() {
         if (factsRequestRef.current !== reqId) return;
         setFacts([]);
         setSourceUrl(null);
-      })
-      .finally(() => {
-        clearTimeout(slowTimer);
-        if (factsRequestRef.current === reqId) {
-          setIsLoadingFacts(false);
-          setSlowLoad(false);
-        }
       });
   };
 
@@ -305,8 +293,6 @@ function App() {
     setSelectedCity(null);
     setDrilledIn(false);
     factsRequestRef.current++;
-    setIsLoadingFacts(false);
-    setSlowLoad(false);
     setFacts([]);
     setSourceUrl(null);
   };
@@ -320,8 +306,6 @@ function App() {
     setSelectedCity(null);
     setDrilledIn(false);
     factsRequestRef.current++;
-    setIsLoadingFacts(false);
-    setSlowLoad(false);
     setFacts([]);
     setSourceUrl(null);
   };
@@ -533,18 +517,7 @@ function App() {
                   )}
                 </>
               ) : (
-                isLoadingFacts ? (
-                  <div style={loadingWrapStyle}>
-                    <div style={spinnerStyle} />
-                    <p style={emptyStateStyle}>
-                      {slowLoad
-                        ? 'Waking up the server — the first lookup can take a minute…'
-                        : 'Gathering facts…'}
-                    </p>
-                  </div>
-                ) : (
-                  <p style={emptyStateStyle}>No facts available yet.</p>
-                )
+                <p style={emptyStateStyle}>Gathering facts...</p>
               )}
             </div>
           )}
@@ -686,22 +659,6 @@ const factItemStyle = {
   lineHeight: 1.6,
   marginBottom: 8,
   color: '#EDE6D6',
-};
-
-const loadingWrapStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 10,
-};
-
-const spinnerStyle = {
-  width: 16,
-  height: 16,
-  flexShrink: 0,
-  borderRadius: '50%',
-  border: '2px solid rgba(127,168,201,0.3)',
-  borderTopColor: '#7FA8C9',
-  animation: 'atlasSpin 0.8s linear infinite',
 };
 
 const emptyStateStyle = {
