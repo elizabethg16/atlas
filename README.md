@@ -8,8 +8,6 @@ Atlas is an interactive 3D globe. Pick a letter and every country, first-level r
 
 **[Open the live site →](https://elizabethg16.github.io/atlas/)**
 
-![Atlas screenshot](docs/screenshot.png)
-
 ## What you can do
 
 - **Pick a letter** from the A–Z index to highlight matching countries, regions and cities.
