@@ -15,6 +15,13 @@ function stableId(adm0a3, name) {
   return `${adm0a3}-${slug}`;
 }
 
+// Natural Earth marks some ISO codes as '-99' (e.g. France, Norway, Kosovo).
+// Must match countryId in backend/services/stableId.js.
+function countryId(props) {
+  const valid = (code) => code && code !== '-99';
+  return [props.ISO_A2, props.ISO_A2_EH, props.ADM0_A3].find(valid);
+}
+
 function hexToRgba(hex, alpha) {
   const clean = hex.replace('#', '');
   const r = parseInt(clean.substring(0, 2), 16);
@@ -229,7 +236,7 @@ function App() {
       globeRef.current.pointOfView({ lat: coords[1], lng: coords[0], altitude: 1.5 }, 1000);
     }
 
-    loadFacts(`${API_URL}/api/countries/${country.properties.ISO_A2}/facts`);
+    loadFacts(`${API_URL}/api/countries/${countryId(country.properties)}/facts`);
   };
 
   const handleRegionClick = (region) => {

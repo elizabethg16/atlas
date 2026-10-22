@@ -4,6 +4,7 @@ const path = require('path');
 const db = require('../db');
 const { scrapeWikipediaArticle } = require('../services/scraper');
 const { extractFacts } = require('../services/summarizer');
+const { countryId } = require('../services/stableId');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -16,11 +17,23 @@ const deleteExisting = db.prepare(`
   DELETE FROM facts WHERE entity_type = 'country' AND entity_id = ?
 `);
 
-async function generateForCountry(name, isoA2) {
-  console.log(`Processing ${name} (${isoA2})...`);
+// Wikipedia titles for countries whose ADMIN name isn't the country's article.
+const ARTICLE_OVERRIDES = {
+  GE: 'Georgia (country)',
+};
+
+const existingCountryIds = new Set(
+  db.prepare(`SELECT DISTINCT entity_id FROM facts WHERE entity_type = 'country'`)
+    .all()
+    .map((row) => row.entity_id)
+);
+
+async function generateForCountry(name, id) {
+  const articleTitle = ARTICLE_OVERRIDES[id] || name;
+  console.log(`Processing ${name} (${id})...`);
 
   try {
-    const article = await scrapeWikipediaArticle(name);
+    const article = await scrapeWikipediaArticle(articleTitle);
     if (!article.text || article.text.length < 200) {
       console.warn(`  Skipped - article too short or not found`);
       return;
@@ -30,11 +43,11 @@ async function generateForCountry(name, isoA2) {
 
    //no duplicates
    const insertMany = db.transaction((factList) => {
-      deleteExisting.run(isoA2);
+      deleteExisting.run(id);
       for (const fact of factList) {
         insertFact.run({
           entity_type: 'country',
-          entity_id: isoA2,
+          entity_id: id,
           entity_name: name,
           fact,
           source_url: article.url,
@@ -53,19 +66,14 @@ async function main() {
   const geojsonPath = path.join(__dirname, '../../data/countries.geojson');
   const geojson = JSON.parse(fs.readFileSync(geojsonPath, 'utf-8'));
 
-  // partial
-  const countries = geojson.features.slice(10);
+  const countries = geojson.features
+    .filter((f) => !existingCountryIds.has(countryId(f.properties)));
+
+  console.log(`${existingCountryIds.size} countries already have facts, ${countries.length} to process.`);
 
   for (const feature of countries) {
     const name = feature.properties.ADMIN;
-    const isoA2 = feature.properties.ISO_A2;
-
-    if (!isoA2 || isoA2 === '-99') {
-      console.warn(`Skipping ${name} - no valid ISO_A2 code`);
-      continue;
-    }
-
-    await generateForCountry(name, isoA2);
+    await generateForCountry(name, countryId(feature.properties));
     await sleep(1000); 
   }
 

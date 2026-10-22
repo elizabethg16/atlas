@@ -1,10 +1,8 @@
 require('dotenv/config');
-const fs = require('fs');
-const path = require('path');
 const db = require('../db');
 const { scrapeWikipediaArticle } = require('../services/scraper');
 const { extractFacts } = require('../services/summarizer');
-const { stableId } = require('../services/stableId');
+const { pendingCities, resolveCity } = require('../services/cityQueue');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -17,14 +15,7 @@ const deleteExisting = db.prepare(`
   DELETE FROM facts WHERE entity_type = 'city' AND entity_id = ?
 `);
 
-const existingCityIds = new Set(
-  db.prepare(`SELECT DISTINCT entity_id FROM facts WHERE entity_type = 'city'`)
-    .all()
-    .map((row) => row.entity_id)
-);
-
-async function generateForCity(cityName, countryName, id) {
-  const searchTitle = `${cityName}, ${countryName}`;
+async function generateForCity(cityName, searchTitle, id) {
   console.log(`Processing ${searchTitle}...`);
 
   try {
@@ -57,40 +48,18 @@ async function generateForCity(cityName, countryName, id) {
 }
 
 async function main() {
-  const citiesPath = path.join(__dirname, '../../frontend/public/cities.geojson');
-  const countriesPath = path.join(__dirname, '../../data/countries.geojson');
-
-  const cities = JSON.parse(fs.readFileSync(citiesPath, 'utf-8'));
-  const countriesData = JSON.parse(fs.readFileSync(countriesPath, 'utf-8'));
-
-  const countryNameByCode = {};
-  countriesData.features.forEach((f) => {
-    countryNameByCode[f.properties.ADM0_A3] = f.properties.ADMIN;
-  });
-
   // Optional limit, e.g. `node scripts/generateCityFacts.js 50` for the 50
   // largest cities still missing facts. Omit it to process all of them.
   const limit = Number(process.argv[2]) || Infinity;
+  const { existingCount, pending } = pendingCities(db, limit);
 
-  const cityFeatures = [...cities.features]
-    .sort((a, b) => (b.properties.pop_max || 0) - (a.properties.pop_max || 0))
-    .filter((f) => !existingCityIds.has(stableId(f.properties.adm0_a3, f.properties.name)))
-    .slice(0, limit);
+  console.log(`${existingCount} cities already have facts, ${pending.length} to process.`);
 
-  console.log(`${existingCityIds.size} cities already have facts, ${cityFeatures.length} to process.`);
+  for (const feature of pending) {
+    const city = await resolveCity(feature);
+    if (!city) continue;
 
-  for (const feature of cityFeatures) {
-    const cityName = feature.properties.name;
-    const adm0a3 = feature.properties.adm0_a3;
-    const countryName = countryNameByCode[adm0a3];
-
-    if (!cityName || !adm0a3 || !countryName) {
-      console.warn(`Skipping a city - missing name/country data`, feature.properties);
-      continue;
-    }
-
-    const id = stableId(adm0a3, cityName);
-    await generateForCity(cityName, countryName, id);
+    await generateForCity(city.cityName, city.articleTitle, city.id);
     await sleep(1000);
   }
 

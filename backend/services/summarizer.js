@@ -1,13 +1,15 @@
 const Anthropic = require('@anthropic-ai/sdk');
 
-const client = new Anthropic();
+// Created on first use so scripts that only need buildFactsPrompt don't
+// require an API key.
+let client;
 
 /**
  * Given raw scraped Wikipedia text, extract genuinely interesting facts -
  * strictly grounded in the provided text, in a plain factual voice.
  */
-async function extractFacts(entityName, rawText, count = 6) {
-  const prompt = `You are extracting facts for a geography reference app. Below is Wikipedia article text about "${entityName}".
+function buildFactsPrompt(entityName, rawText, count = 6) {
+  return `You are extracting facts for a geography reference app. Below is Wikipedia article text about "${entityName}".
 
 GROUNDING RULES - these are strict, not suggestions:
 - Only use information explicitly stated in the article text below. Do not add outside knowledge, even if you're confident it's true.
@@ -31,7 +33,12 @@ Article text:
 """
 ${rawText.slice(0, 8000)}
 """`;
+}
 
+async function extractFacts(entityName, rawText, count = 6) {
+  const prompt = buildFactsPrompt(entityName, rawText, count);
+
+  client ??= new Anthropic();
   const response = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 1024,
@@ -51,4 +58,4 @@ ${rawText.slice(0, 8000)}
   }
 }
 
-module.exports = { extractFacts };
+module.exports = { extractFacts, buildFactsPrompt };
